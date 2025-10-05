@@ -25,14 +25,17 @@ region_file_map = {
     "Arizona, USA": "bloomwatch_arizona.csv"
 }
 
+# ✅ LOOK INSIDE bloomwatch-flat/data/exports/
 file_path = None
-for path in glob.glob("data/exports/*.csv"):
+search_path = os.path.join(os.path.dirname(__file__), "../data/exports/*.csv")
+
+for path in glob.glob(search_path):
     if region_file_map[region] in path:
         file_path = path
         break
 
 if not file_path:
-    st.error(f"🚨 Could not find CSV for {region}. Expected `{region_file_map[region]}` in data/exports/")
+    st.error(f"🚨 Could not find CSV for {region}. Expected `{region_file_map[region]}` inside bloomwatch-flat/data/exports/")
     st.stop()
 
 # -------------------------------------------------------
@@ -41,11 +44,16 @@ if not file_path:
 df = pd.read_csv(file_path)
 st.success(f"✅ Loaded NASA MODIS dataset for **{region}**")
 
+# Fix timestamp issue (from milliseconds)
 if 'time' not in df.columns:
     st.error("CSV must include a 'time' column with timestamps from Earth Engine.")
     st.stop()
 
-df['time'] = pd.to_datetime(df['time'], errors='coerce')
+if df['time'].dtype in ['int64', 'float64']:
+    df['time'] = pd.to_datetime(df['time'], unit='ms', errors='coerce')
+else:
+    df['time'] = pd.to_datetime(df['time'], errors='coerce')
+
 df = df.sort_values('time').dropna(subset=['NDVI', 'EVI']).reset_index(drop=True)
 df['Month'] = df['time'].dt.strftime('%b %Y')
 
