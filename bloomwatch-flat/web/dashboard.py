@@ -38,23 +38,34 @@ else:
     st.error("CSV must include a 'time' column with timestamps from Earth Engine.")
     st.stop()
 
-# Sort and filter
+# Sort and clean
 df = df.sort_values('time')
 df = df.dropna(subset=['NDVI', 'EVI'])
 df = df.reset_index(drop=True)
 
-# Extract year and month for display
+# Extract month for labeling
 df['Month'] = df['time'].dt.strftime('%b %Y')
 
-# Sidebar controls
+# -------------------------------------------------------
+# SIDEBAR CONTROLS
+# -------------------------------------------------------
 st.sidebar.title("🌱 Display Options")
-start_year = int(df['time'].dt.year.min())
-end_year = int(df['time'].dt.year.max())
-year_range = st.sidebar.slider("Select year range", start_year, end_year, (start_year, end_year))
-months = st.sidebar.slider("Months to show", 6, len(df), 24, 1)
 
-# Filter by selected year range
-df = df[(df['time'].dt.year >= year_range[0]) & (df['time'].dt.year <= year_range[1])]
+unique_years = sorted(df['time'].dt.year.unique())
+
+# Handle one-year datasets safely
+if len(unique_years) > 1:
+    year_range = st.sidebar.slider(
+        "Select year range",
+        int(unique_years[0]),
+        int(unique_years[-1]),
+        (int(unique_years[0]), int(unique_years[-1]))
+    )
+    df = df[(df['time'].dt.year >= year_range[0]) & (df['time'].dt.year <= year_range[1])]
+else:
+    st.sidebar.info(f"Data covers only one year: {unique_years[0]}")
+
+months = st.sidebar.slider("Months to display", 6, len(df), 24, 1)
 
 # -------------------------------------------------------
 # PREDICT BLOOM
@@ -64,7 +75,7 @@ bloom_date = df['Month'].iloc[idx]
 bloom_value = df['NDVI'].iloc[idx]
 
 # -------------------------------------------------------
-# CHART
+# PLOT CHART
 # -------------------------------------------------------
 st.subheader("📈 NDVI / EVI Time Series — Muscat, Oman")
 
