@@ -22,8 +22,8 @@ region = st.sidebar.selectbox("Choose a region", ["Muscat, Oman", "Arizona, USA"
 
 # Define folder paths for each region
 region_paths = {
-    "Muscat, Oman": "../data/muscat/bloomwatch_muscat.csv",
-    "Arizona, USA": "../data/arizona/bloomwatch_arizona.csv"
+    "Muscat, Oman": "web/data/muscat/bloomwatch_muscat.csv",
+    "Arizona, USA": "web/data/arizona/bloomwatch_arizona.csv"
 }
 
 # Get file path based on region
