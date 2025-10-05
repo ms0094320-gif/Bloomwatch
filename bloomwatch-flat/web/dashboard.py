@@ -1,88 +1,97 @@
 import streamlit as st
-import numpy as np
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import glob, os
 
-# -------------------------------
-# Page setup
-# -------------------------------
-st.set_page_config(page_title='BloomWatch', layout='wide')
-st.title('🌿 BloomWatch Dashboard (Real NASA Data)')
+# -------------------------------------------------------
+# PAGE SETUP
+# -------------------------------------------------------
+st.set_page_config(page_title='BloomWatch: NASA MODIS', layout='wide')
+st.title("🌿 BloomWatch: Real NASA MODIS Vegetation Data")
+st.markdown("""
+**BloomWatch** visualizes real vegetation health data from NASA’s MODIS MOD13Q1 collection.  
+This dashboard analyzes **NDVI** (Normalized Difference Vegetation Index) and **EVI** (Enhanced Vegetation Index)
+exported from **Google Earth Engine** for a 2 km radius area near **Muscat, Oman (2021–2024)**.
+""")
 
-# -------------------------------
-# Sidebar controls
-# -------------------------------
-col1, col2 = st.columns([1,2])
-with col1:
-    region = st.selectbox('Region', ['Muscat', 'Dhofar', 'Tokyo', 'California'])
-    months = st.slider('Months to display', 6, 24, 12, 1)
-    st.markdown('---')
-    st.caption(
-        "🌍 Using **real NASA MODIS NDVI/EVI data** exported via Google Earth Engine (MOD13Q1 collection). "
-        "This visualization shows vegetation dynamics for the selected region and period."
-    )
-
-# -------------------------------
-# Load real CSV data
-# -------------------------------
-# Look for any CSV inside data/exports/
+# -------------------------------------------------------
+# LOAD REAL CSV DATA
+# -------------------------------------------------------
 csv_files = sorted(glob.glob("data/exports/*.csv"))
 
 if csv_files:
-    file_path = csv_files[0]  # take the first CSV found
+    file_path = csv_files[0]  # use first CSV found
     df = pd.read_csv(file_path)
-    st.success(f"Loaded real NASA MODIS dataset: `{os.path.basename(file_path)}`")
+    st.success(f"✅ Loaded real NASA MODIS dataset: `{os.path.basename(file_path)}`")
 else:
-    st.warning("No CSV file found in data/exports/. Using demo synthetic data instead.")
-    t = np.arange(12)
-    df = pd.DataFrame({
-        'Month': ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],
-        'NDVI': 0.2 + 0.3*np.sin((t-2)/12*2*np.pi),
-        'EVI': 0.15 + 0.25*np.sin((t-2)/12*2*np.pi)
-    })
+    st.error("🚨 No CSV file found in `data/exports/`. Please add your exported file.")
+    st.stop()
 
-# -------------------------------
-# Handle time column if available
-# -------------------------------
+# -------------------------------------------------------
+# CLEAN AND PREPARE DATA
+# -------------------------------------------------------
+# Convert time to datetime
 if 'time' in df.columns:
-    try:
-        df['time'] = pd.to_datetime(df['time'])
-        df = df.sort_values('time')
-        df['Month'] = df['time'].dt.strftime('%b %Y')
-    except Exception:
-        df['Month'] = range(1, len(df)+1)
-elif 'Month' not in df.columns:
-    df['Month'] = range(1, len(df)+1)
+    df['time'] = pd.to_datetime(df['time'], errors='coerce')
+else:
+    st.error("CSV must include a 'time' column with timestamps from Earth Engine.")
+    st.stop()
 
-# -------------------------------
-# Predict bloom (max NDVI)
-# -------------------------------
+# Sort and filter
+df = df.sort_values('time')
+df = df.dropna(subset=['NDVI', 'EVI'])
+df = df.reset_index(drop=True)
+
+# Extract year and month for display
+df['Month'] = df['time'].dt.strftime('%b %Y')
+
+# Sidebar controls
+st.sidebar.title("🌱 Display Options")
+start_year = int(df['time'].dt.year.min())
+end_year = int(df['time'].dt.year.max())
+year_range = st.sidebar.slider("Select year range", start_year, end_year, (start_year, end_year))
+months = st.sidebar.slider("Months to show", 6, len(df), 24, 1)
+
+# Filter by selected year range
+df = df[(df['time'].dt.year >= year_range[0]) & (df['time'].dt.year <= year_range[1])]
+
+# -------------------------------------------------------
+# PREDICT BLOOM
+# -------------------------------------------------------
 idx = int(np.argmax(df['NDVI'][:months]))
-bloom_val = df['NDVI'].iloc[idx]
+bloom_date = df['Month'].iloc[idx]
+bloom_value = df['NDVI'].iloc[idx]
 
-# -------------------------------
-# Plot the chart
-# -------------------------------
-with col2:
-    st.subheader('📈 NDVI/EVI Time Series (Real MODIS Data)')
-    fig, ax = plt.subplots(figsize=(8,4))
-    ax.plot(df['Month'][:months], df['NDVI'][:months], marker='o', label='NDVI')
-    ax.plot(df['Month'][:months], df['EVI'][:months], marker='o', label='EVI')
-    ax.axvline(x=idx, linestyle='--', color='gray')
-    ax.annotate('Predicted Bloom', xy=(idx, bloom_val), xytext=(idx+0.5, bloom_val+0.05),
-                arrowprops=dict(arrowstyle='->', lw=1.5))
-    ax.set_ylim(0, max(0.9, df[['NDVI','EVI']].max().max()+0.1))
-    ax.legend()
-    st.pyplot(fig)
+# -------------------------------------------------------
+# CHART
+# -------------------------------------------------------
+st.subheader("📈 NDVI / EVI Time Series — Muscat, Oman")
 
-# -------------------------------
-# Footer
-# -------------------------------
-st.markdown('---')
+fig, ax = plt.subplots(figsize=(10, 4))
+ax.plot(df['Month'][:months], df['NDVI'][:months], marker='o', label='NDVI')
+ax.plot(df['Month'][:months], df['EVI'][:months], marker='o', label='EVI')
+ax.axvline(x=bloom_date, linestyle='--', color='gray')
+ax.annotate(f'Predicted Bloom\n({bloom_date})',
+            xy=(idx, bloom_value),
+            xytext=(idx + 0.5, bloom_value + 0.02),
+            arrowprops=dict(arrowstyle='->', lw=1.2),
+            fontsize=9)
+ax.set_ylim(0, max(0.9, float(df[['NDVI','EVI']].max().max()) + 0.1))
+ax.set_xlabel("Time (2021–2024)")
+ax.set_ylabel("Vegetation Index Value")
+ax.legend()
+plt.xticks(rotation=45)
+st.pyplot(fig)
+
+# -------------------------------------------------------
+# FOOTER
+# -------------------------------------------------------
+st.markdown("---")
 st.caption("""
-🛰 **Data Source:** NASA MODIS MOD13Q1 (NDVI/EVI 16-day composite)  
-📊 **Processing:** Exported through Google Earth Engine  
-🌱 **Purpose:** Real NDVI/EVI visualization and bloom timing detection.
+🛰 **Data Source:** NASA MODIS MOD13Q1 (NDVI/EVI, 16-day composite, 250m resolution)  
+📍 **Region:** Muscat, Oman (2 km radius)  
+📅 **Time range:** 2021–2024  
+⚙️ **Processed via:** Google Earth Engine  
+🌱 **Purpose:** Analyze real vegetation patterns and detect bloom timing.
 """)
-
