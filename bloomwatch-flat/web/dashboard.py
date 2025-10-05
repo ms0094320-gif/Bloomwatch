@@ -1,35 +1,109 @@
-import streamlit as st, numpy as np, pandas as pd, matplotlib.pyplot as plt
+import streamlit as st
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import glob, os
 
-st.set_page_config(page_title='BloomWatch', layout='wide')
-st.title('BloomWatch Dashboard (Demo)')
+# -------------------------------------------------------
+# PAGE SETUP
+# -------------------------------------------------------
+st.set_page_config(page_title='BloomWatch: NASA MODIS', layout='wide')
+st.title("🌿 BloomWatch: Real NASA MODIS Data (Last 12 Months)")
+st.markdown("""
+**BloomWatch** visualizes vegetation health using real satellite data from NASA’s **MODIS MOD13Q1** collection.  
+You can compare bloom trends between **Muscat, Oman** and **Arizona, USA** over the most recent 12 months.
+""")
 
-# Controls
-col1, col2 = st.columns([1,2])
-with col1:
-    region = st.selectbox('Region', ['Muscat', 'Dhofar', 'Tokyo', 'California'])
-    months = st.slider('Months to display', 6, 12, 12, 1)
-    st.markdown('---')
-    st.caption('This demo uses synthetic NDVI/EVI. Replace with exports in data/exports/.')
+# -------------------------------------------------------
+# REGION SELECTION
+# -------------------------------------------------------
+st.sidebar.title("🌍 Select Region")
+region = st.sidebar.selectbox("Choose a region", ["Muscat, Oman", "Arizona, USA"])
 
-# Synthetic NDVI/EVI seasonal curve
-t = np.arange(12)
-ndvi = 0.2 + 0.3*np.sin((t-2)/12*2*np.pi)
-evi  = 0.15 + 0.25*np.sin((t-2)/12*2*np.pi)
-df = pd.DataFrame({'Month': ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],
-                   'NDVI': ndvi, 'EVI': evi})
+region_file_map = {
+    "Muscat, Oman": "bloomwatch_muscat.csv",
+    "Arizona, USA": "bloomwatch_arizona.csv"
+}
 
-with col2:
-    st.subheader('NDVI/EVI time series')
-    fig, ax = plt.subplots(figsize=(7,3))
-    ax.plot(df['Month'][:months], df['NDVI'][:months], marker='o', label='NDVI')
-    ax.plot(df['Month'][:months], df['EVI'][:months], marker='o', label='EVI')
-    idx = int(np.argmax(df['NDVI'][:months]))
-    ax.axvline(x=idx, linestyle='--')
-    ax.annotate('Predicted bloom', xy=(idx, df['NDVI'][idx]), xytext=(idx+0.3, df['NDVI'][idx]+0.05),
-                arrowprops=dict(arrowstyle='->'))
-    ax.set_ylim(0, 0.8)
-    ax.legend()
-    st.pyplot(fig)
+# ✅ LOOK INSIDE bloomwatch-flat/data/exports/
+file_path = None
+search_path = os.path.join(os.path.dirname(__file__), "../data/exports/*.csv")
 
-st.markdown('---')
-st.caption('Next steps: swap synthetic series for real MODIS/VIIRS exports and model predictions.')
+for path in glob.glob(search_path):
+    if region_file_map[region] in path:
+        file_path = path
+        break
+
+if not file_path:
+    st.error(f"🚨 Could not find CSV for {region}. Expected `{region_file_map[region]}` inside bloomwatch-flat/data/exports/")
+    st.stop()
+
+# -------------------------------------------------------
+# LOAD DATA
+# -------------------------------------------------------
+df = pd.read_csv(file_path)
+st.success(f"✅ Loaded NASA MODIS dataset for **{region}**")
+
+# Fix timestamp issue (from milliseconds)
+if 'time' not in df.columns:
+    st.error("CSV must include a 'time' column with timestamps from Earth Engine.")
+    st.stop()
+
+if df['time'].dtype in ['int64', 'float64']:
+    df['time'] = pd.to_datetime(df['time'], unit='ms', errors='coerce')
+else:
+    df['time'] = pd.to_datetime(df['time'], errors='coerce')
+
+df = df.sort_values('time').dropna(subset=['NDVI', 'EVI']).reset_index(drop=True)
+df['Month'] = df['time'].dt.strftime('%b %Y')
+
+# -------------------------------------------------------
+# FILTER TO LAST 12 MONTHS
+# -------------------------------------------------------
+latest_date = df['time'].max()
+start_date = latest_date - pd.DateOffset(months=12)
+df_12 = df[df['time'] >= start_date]
+
+if df_12.empty:
+    st.warning("⚠️ No data found for the past 12 months.")
+    st.stop()
+
+# -------------------------------------------------------
+# PREDICT BLOOM
+# -------------------------------------------------------
+idx = int(np.argmax(df_12['NDVI']))
+bloom_date = df_12['Month'].iloc[idx]
+bloom_value = df_12['NDVI'].iloc[idx]
+
+# -------------------------------------------------------
+# CHART
+# -------------------------------------------------------
+st.subheader(f"📈 NDVI / EVI Time Series — {region} (Last 12 Months)")
+
+fig, ax = plt.subplots(figsize=(10, 4))
+ax.plot(df_12['Month'], df_12['NDVI'], marker='o', label='NDVI')
+ax.plot(df_12['Month'], df_12['EVI'], marker='o', label='EVI')
+ax.axvline(x=bloom_date, linestyle='--', color='gray')
+ax.annotate(f'Predicted Bloom\n({bloom_date})',
+            xy=(idx, bloom_value),
+            xytext=(idx + 0.5, bloom_value + 0.02),
+            arrowprops=dict(arrowstyle='->', lw=1.2),
+            fontsize=9)
+ax.set_ylim(0, max(0.9, float(df_12[['NDVI','EVI']].max().max()) + 0.1))
+ax.set_xlabel("Time (Last 12 Months)")
+ax.set_ylabel("Vegetation Index Value")
+ax.legend()
+plt.xticks(rotation=45)
+st.pyplot(fig)
+
+# -------------------------------------------------------
+# FOOTER
+# -------------------------------------------------------
+st.markdown("---")
+st.caption(f"""
+🛰 **Data Source:** NASA MODIS MOD13Q1 (NDVI/EVI, 16-day composite, 250 m resolution)  
+📍 **Region:** {region}  
+📅 **Time Range:** Last 12 months (Oct 2024 – Oct 2025)  
+⚙️ **Processed via:** Google Earth Engine  
+🌱 **Purpose:** Analyze and compare vegetation bloom patterns using real NASA data.
+""")
